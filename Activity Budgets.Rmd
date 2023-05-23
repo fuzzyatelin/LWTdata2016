@@ -1,25 +1,27 @@
 ---
 title: "Activity Budgets"
+author: Laura Angley, with modifications by Christopher Schmitt
 output: html_document
 ---
 
 ```{r}
 library(lme4)
-library(tidyr)
-library(ggplot2)
-install.packages("pillar")
-install.packages('Rcpp', dependencies = TRUE)
-library(dplyr)
-
-remove.packages("rlang")
-install.packages("rlang")
+library(tidyverse)
+#install.packages("pillar")
 library(rlang)
-library(dplyr)
 ```
 
 ## Activity Budgets PRE RELEASE
 ### Behavior Categories
 *Focal Dataset*
+
+`Note from Chris: the input for the datafile you're using for the activity budget is missing!  This chunk is my best guess`
+
+```{r}
+pre_focals<-read.csv("2016_pre-release_FULL_UPDATED.csv",header=T)
+```
+
+
 ```{r}
 pre_focals_budget<- pre_focals %>%
   gather("Obs", "behavior", 22:23, na.rm = T) %>% #gathering the two behavior columns
@@ -35,6 +37,38 @@ unique(pre_focals_budget$behavior.category)
 ```
 
 ### Mean Activity Budget Per Hour
+
+Total:
+```{r}
+PreTotal_budget<- pre_focals_budget %>%
+  group_by(MONTH,day,hour,behavior.category) %>% #group by these columns because I need unique counts PER HOUR
+  summarize(count=n()) #counts up all of the times the behavior in that category was recorded (this is per focal minute)
+
+#This gives us all occurrences of each category:
+table(PreTotal_budget$behavior.category)
+
+# Feeding Locomote    Other Predator   Social   Stress 
+#    1081      978     1016     1207      823      467 
+
+PreTotal_budget2<- PreTotal_budget %>%
+  group_by(behavior.category) %>% #group by each behavior category
+  summarize(total= sum(count)) %>% #this creates a new column called "total" that is the sum of the count column 
+  mutate(Occurrences = #new column called "occurrrences"
+           case_when(behavior.category == "Feeding" ~ as.numeric(1081), #these numbers are the number of times each category was listed in the dataframe up above (Pops_budget). I have to find these because not ever behavior category has the same number of hours it was recorded in, I need to find the unique number for each category. I found these numbers using table(Pops_budget$behavior.category) in the console
+                     behavior.category == "Locomote" ~ as.numeric(978),
+                     behavior.category == "Other" ~ as.numeric(1016),
+                     behavior.category == "Predator" ~ as.numeric(1207),
+                     behavior.category == "Social" ~ as.numeric(823),
+                     behavior.category == "Stress" ~ as.numeric(467))) %>%
+  mutate(Mean = (total/Occurrences)) #new column called "mean" which is the total sum of each behavior category divided by the number of hours it is recorded in (i.e the occurrences column)
+PreTotal_budget2$total<- NULL
+PreTotal_budget2$Occurrences<- NULL
+PreTotal_budget2$release<-rep(c("pre"),times=7)
+
+PreTotal_budget2
+```
+
+By individual:
 ```{r}
 #Pops
 Pops_budget<- pre_focals_budget %>%
@@ -420,7 +454,8 @@ pre_fullbudget<- Pops_budget2 %>%
   full_join(Nev_budget2,by= "behavior.category") %>%
   rowwise() %>% #this allows us to work with row-wise dataframe where we want to look at each row individually
   mutate(TroopMean = ((sum(c_across(2:16),na.rm=T))/15), #adding up all the means per category and dividing by 17 monkeys to get average
-        release = "pre") #adding column to identify pre-release
+        release = "pre") %>% #adding column to identify pre-release
+  rename("Blue" = 2,"Amy" = 3,"Alex" = 4,"Boo" = 5,"Bgm" = 6,"Aug" = 7,"Ed" = 8,"Jack" = 9,"Tink" = 10,"Kovu" = 11,"Mango" = 12,"May" = 13,"Toni" = 14,"Nev" = 15)
 
 pre_fullbudget_reduced<- pre_fullbudget[,c("behavior.category","TroopMean","release")] #these are the only columns I want to look at now
 pre_fullbudget_reduced
@@ -459,6 +494,7 @@ Males_budget %>% filter(ID == "Pops")
 
 ### Trying to do Wilcoxon Test with Batman and Pops
 ```{r}
+library(ggpubr)
 ggdensity(Males_budget$count)
 ggqqplot(Males_budget$count)
 
@@ -472,6 +508,13 @@ WT_PopsBat_pred
 
 ## Activity Budgets POST RELEASE
 ### Behavior Categories
+
+`Note from Chris: again the dataset is missing here, so using my best guess`
+```{r}
+post_focals<-read.csv("2016_post-release_focals_FULL.csv",header=T)
+```
+
+
 ```{r}
 post_focals_budget<- post_focals %>%
   gather("Obs", "behavior", 19:20, na.rm = T) %>% #gathering the two behavior columns
@@ -490,6 +533,38 @@ unique(post_focals_budget$behavior.category)
 ```
 
 ### Mean Activity Budget Per Focal
+
+Total:
+```{r}
+PostTotal_budget<- post_focals_budget %>%
+  group_by(MONTH,day,hour,behavior.category) %>% #group by these columns because I need unique counts PER HOUR
+  summarize(count=n()) #counts up all of the times the behavior in that category was recorded (this is per focal minute)
+
+#This gives us all occurrences of each category:
+table(PostTotal_budget$behavior.category)
+
+# Feeding Locomote    Other Predator   Social   Stress 
+#     393      381      341      429      112      143 
+
+PostTotal_budget2<- PostTotal_budget %>%
+  group_by(behavior.category) %>% #group by each behavior category
+  summarize(total= sum(count)) %>% #this creates a new column called "total" that is the sum of the count column 
+  mutate(Occurrences = #new column called "occurrrences"
+           case_when(behavior.category == "Feeding" ~ as.numeric(393), #these numbers are the number of times each category was listed in the dataframe up above (Pops_budget). I have to find these because not ever behavior category has the same number of hours it was recorded in, I need to find the unique number for each category. I found these numbers using table(Pops_budget$behavior.category) in the console
+                     behavior.category == "Locomote" ~ as.numeric(381),
+                     behavior.category == "Other" ~ as.numeric(341),
+                     behavior.category == "Predator" ~ as.numeric(429),
+                     behavior.category == "Social" ~ as.numeric(112),
+                     behavior.category == "Stress" ~ as.numeric(143))) %>%
+  mutate(Mean = (total/Occurrences)) #new column called "mean" which is the total sum of each behavior category divided by the number of hours it is recorded in (i.e the occurrences column)
+PostTotal_budget2$total<- NULL
+PostTotal_budget2$Occurrences<- NULL
+PostTotal_budget2$release<-rep(c("post"),times=7)
+
+PostTotal_budget2
+```
+
+Individuals:
 ```{r}
 #Pops
 Pops_budget3<- post_focals_budget %>%
@@ -913,7 +988,8 @@ post_fullbudget<- Pops_budget4 %>%
   full_join(Nev_budget4,by= "behavior.category") %>%
   rowwise() %>% #this allows us to work with row-wise dataframe where we want to look at each row individually
   mutate(TroopMean = ((sum(c_across(2:16),na.rm=T))/15), #adding up all the means per category and dividing by 19 monkeys to get average
-        release= "post") #adding column to identify pre-release
+        release= "post") %>% #adding column to identify pre-release
+        rename("Blue" = 2,"Amy" = 3,"Alex" = 4,"Boo" = 5,"Bgm" = 6,"Aug" = 7,"Ed" = 8,"Jack" = 9,"Tink" = 10,"Kovu" = 11,"Mango" = 12,"May" = 13,"Toni" = 14,"Nev" = 15)
 
 post_fullbudget_reduced<- post_fullbudget[,c("behavior.category","TroopMean","release")] #these are the only columns I want to look at now
 post_fullbudget_reduced
@@ -923,6 +999,31 @@ post_fullbudget_FULL<- bind_rows(Pops_budget4,Blue_budget4,Amy_budget4,Alex_budg
 ```
 
 ### MEAN Activity Budget Tables and BarChart
+
+For totals:
+```{r}
+total_budget_table<- bind_rows(na.omit(PreTotal_budget2),na.omit(PostTotal_budget2))
+total_budget_table<- total_budget_table %>%
+  mutate(proportion= Mean/60)
+total_budget_table$release=
+factor(total_budget_table$release, levels = c("pre", "post"), ordered = TRUE)
+total_budget_table
+
+#BarChart
+full_totalbudgetplot<- ggplot(data=na.omit(total_budget_table), aes(x=behavior.category, y=proportion, fill=release)) +
+  geom_bar(position="dodge", stat="identity") +
+  scale_fill_discrete(name = "Release Stage", labels = c("Pre", "Post")) +
+  scale_y_continuous(labels=scales::percent) +
+  theme(axis.text.x = element_text(angle = 45, hjust =1)) + #turning labels on an angle
+  labs(x="Behavior Category",y="Mean Percentage Per Hour",fill= "Release Stage") +
+  theme(legend.box.background = element_rect(colour = "black")) +
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), #removing gridlines and background 
+panel.background = element_blank(), axis.line = element_line(colour = "black")) +
+  scale_fill_manual(values = c("slategray3","slategray4"))
+full_totalbudgetplot
+```
+
+For individual-based stats:
 ```{r}
 combined_budget_table<- bind_rows(pre_fullbudget_reduced, post_fullbudget_reduced)
 combined_budget_table<- combined_budget_table %>%
@@ -930,7 +1031,7 @@ combined_budget_table<- combined_budget_table %>%
 combined_budget_table$release= factor(combined_budget_table$release, levels = c("pre", "post"), ordered = TRUE) #reordering the levels so that the bars appear on the barchart in pre-post order
 
 #BarChart
-full_budgetplot<- ggplot(data=combined_budget_table, aes(x=behavior.category, y=proportion, fill=release)) +
+full_budgetplot<- ggplot(data=na.omit(combined_budget_table), aes(x=behavior.category, y=proportion, fill=release)) +
   geom_bar(position="dodge", stat="identity") +
   scale_fill_discrete(name = "Release Stage", labels = c("Pre", "Post")) +
   scale_y_continuous(labels=scales::percent) +
@@ -949,6 +1050,7 @@ RESULTS: This figure shows the troop's mean percentage of behavior occurrences i
 ## Wilcoxon Tests
 ### Predator Category
 *Setting up Table*
+
 ```{r}
 pre_fullbudget_pred<- pre_fullbudget %>%
   filter(behavior.category == "Predator") %>%
@@ -1018,6 +1120,8 @@ post <- subset(fullbudget_pred, release == "post", Means,
 # Plot paired data
 pd <- paired(pre, post)
 plot(pd, type = "profile") + theme_bw()
+
+ggpaired(fullbudget_pred,x="release",y="Means",fill="release") + theme_bw() + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
 ```
 
 *Running Wilcoxon Test*
