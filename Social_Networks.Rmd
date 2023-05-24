@@ -1,0 +1,152 @@
+---
+title: "Vervet Social Networks"
+author: "Christopher A Schmitt"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: TRUE
+    toc_depth: 5
+    toc_float: TRUE
+    theme: lumen
+---
+
+Ok, so this markdown is attempting to replicate Nick Mikulski's social network analyses (which we only have in html format) for Laura Angley's MS thesis publication!
+
+# 1 Pre-Release Proximity Plot
+
+## 1.1 Inputting Datasets & Editing the Datafrome
+
+```{r}
+library(curl)
+library(tidyverse)
+pre_socnet<- curl("https://raw.githubusercontent.com/nickmikulski/Spring2021/main/Pre-release_Social%20Proximity_csv.csv")
+pre_socnet<- read.csv(pre_socnet, header = T, na.strings=c(""," ","NA"))
+#head(pre_socnet)
+#str(pre_socnet)
+
+pre_socnet_close<- pre_socnet %>% #creating a new dataframe called pre_socnet_close using data from the original pre_socnet dataframe
+  filter(Focal.ID != "BT", #this code REMOVES all data that has Batman has the focal ID (BT is wild male from prerelease)
+         Association != "BT", #this code REMOVES all data that has Batman in association column
+         Proximity.Code %in% c("1","2") #this code only keeps proximity codes 1,2 (excluding 3,4) because we are focusing on closer proximity
+  ) 
+head(pre_socnet_close)
+```
+
+## 1.2 Creating a Matrix
+
+```{r}
+# 1. Create a character vector of all the focal IDs in dataset:
+pre_sn_IDs<-as.character(unique(pre_socnet_close$Focal.ID))
+#pre_sn_IDs
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+pre_sn_monkeylist<-lapply(pre_sn_IDs, function(x){pre_socnet[pre_socnet[["Focal.ID"]] == x, ]})
+# The line above is a little bit confusing. It is creating a separate dataframe for each individual based on their focal id
+#head(pre_sn_monkeylist)
+
+# 3. Group each by focal/associate, and count how many times they are observed close together:
+pre_sn_grouped<-
+  pre_sn_monkeylist %>%
+  purrr::map(~group_by(.,Association)) %>%
+  purrr::map(~summarize(.,count=n())) 
+#pre_sn_grouped
+
+names(pre_sn_grouped) <- pre_sn_IDs #this gives each grouped list the name of the Focal ID
+#pre_sn_grouped
+
+# 4. Set up pairwise combinations of interacting monkeys:
+pre_sn_monkeycombos<-list(focal=pre_sn_IDs, associate=pre_sn_IDs) #create list of all possible focals/associates
+pre_sn_filtf<- function(x, y) {x == y} #create function to filter out same-monkey pairs ("PO is close to PO")
+pre_sn_combo<- pre_sn_monkeycombos %>% cross_df(.,.filter=pre_sn_filtf) #get the filtered combined list as a dataframe
+#pre_sn_combo
+```
+
+## 1.3 Create the dataframe and matrix
+
+```{r}
+# 5. Create new dataframes with specific criteria
+pre_sn_combo2<-
+  pre_sn_combo %>%
+  mutate(absent1 = map2_chr( #new column called "absent1"
+    focal,
+    associate,
+    ~if_else(.x %in% names(pre_sn_grouped),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    focal,
+    associate,
+    ~if_else(.y %in% pre_sn_grouped[[.x]]$Association,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2) #this removes those two new columns you made so you're just left with the ID names
+#Honestly I was quite confused on parts of this, but Laura/Dr. Schmitt gave me this helpful code
+
+pre_sn_combo3<- pre_sn_combo2 %>% 
+  mutate(proximity = map2_int( #new column called "proximity" that is the count for when proximity code = 1 or 2
+    focal, 
+    associate, 
+    ~pre_sn_grouped %>% pluck(.x) %>% filter(Association==.y) %>% as.data.frame(.) %>% .[,2]))
+#pre_sn_combo3
+
+# 6. Create your matrix
+pre_sn_matrix<-spread(pre_sn_combo3,associate,proximity) %>% column_to_rownames(var="focal") %>% data.matrix()
+#pre_sn_matrix
+```
+
+## 1.4 Creating a social network plot based on this matrix
+
+Converting the matrix into a data frame
+
+```{r}
+pre_sn_codes <- c("AL", "AM", "AU", "BA", "BL", "BM", "BO", "ED", "JA", "KO", "MA", "MG", "NE", "PO", "TI", "TO", "ZI")
+pre_sn_df <- as.data.frame(pre_sn_matrix, stringsAsFactors = TRUE)
+#pre_sn_df
+```
+
+## 1.5 Plotting based on dataframe
+
+My original intention was to use the matrix that was just created in order to plot the social network, however, I keep getting an error message that says "Some vertex names in edge list are not listed in vertex data frame. I tried trouble shooting this with no success, so I instead tried to work with the dataframe that created right before the matrix (pre_sn_combo3), and I had some success. Below is how I was originally trying to create the graph using the matrix.
+
+Alternatives (?):
+pre_sn_graph <- graph_from_data_frame(d=pre_sn_edges, vertices = pre_sn_nodes, directed = TRUE) #Using the matrix
+
+```{r,warning=F,message=F}
+library(igraph)
+sortproxf <- pre_sn_combo3[order(pre_sn_combo3$proximity),]
+#sortproxf
+
+pre_sn_edges <- pre_sn_df #assigning the matrix data frame to our edges
+pre_sn_vertices <- c(pre_sn_codes)
+pre_sn_df2 <- as.data.frame(sortproxf, stringsAsFactors = TRUE, row.names = pre_sn_vertices)
+pre_sn_graph <- graph_from_data_frame(d=pre_sn_df2, vertices = pre_sn_vertices, directed = FALSE) #using the step before the matrix
+#pre_sn_graph
+#simplesn<-simplify(pre_sn_graph, remove.multiple = FALSE, remove.loops = TRUE)
+
+pre_sn_proximity <- as.numeric(unlist(dplyr::select(pre_sn_combo3, "proximity"))) #Creating a numeric vector from the proximity values in order to visualize in plot   
+#pre_sn_proximity
+
+#Trying to categorize by color:
+pre_sn_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+pre_sn_color <- pre_sn_colorrange(length(pre_sn_proximity)) #how many   
+
+#oranges <- colorRampPalette(c("dark red", "gold"))
+#col <- oranges(max(pre_sn_proximity)+1)
+#col <- col[pre_sn_proximity+1]
+#l <- layout_on_sphere(net.bg)
+
+#pre_sn_combo3[order(-pre_sn_combo3$proximity), ]
+```
+
+```{r, fig.height=4,fig.width=4}
+par(bg="white")
+plot(pre_sn_graph,
+     vertex.size=(1/25*pre_sn_proximity), #18,
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.arrow.size=0.5,  # Arrow size, defaults to 1
+     edge.arrow.width=0.5,
+     edge.width=((1/70)*(pre_sn_proximity)), #The thickness of the edges is now related to the proximity strength between indivs
+     edge.curved=0.25, #c(rep(0,500), rep(1,500)),
+     edge.color=pre_sn_color #[pre_sn_graph$proximity]
+     )  #rep(c("darkred","yellow"), (length(pre_sn_proximity))))  #col)    #"black") #pre_sn_color)
+```
+

@@ -1121,7 +1121,7 @@ post <- subset(fullbudget_pred, release == "post", Means,
 pd <- paired(pre, post)
 plot(pd, type = "profile") + theme_bw()
 
-ggpaired(fullbudget_pred,x="release",y="Means",fill="release") + theme_bw() + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
+ggpaired(fullbudget_pred,x="release",y="Means",fill="release",color="slategray4",line.color="gray",line.size = 0.4) + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
 ```
 
 *Running Wilcoxon Test*
@@ -1198,6 +1198,8 @@ post <- subset(fullbudget_social, release == "post", Means,
 # Plot paired data
 pd <- paired(pre, post)
 plot(pd, type = "profile") + theme_bw()
+
+ggpaired(fullbudget_social,x="release",y="Means",fill="release",color="slategray4",line.color="gray",line.size = 0.4) + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
 ```
 
 *Running Wilcoxon Test*
@@ -1271,6 +1273,8 @@ post <- subset(fullbudget_stress, release == "post", Means,
 # Plot paired data
 pd <- paired(pre, post)
 plot(pd, type = "profile") + theme_bw()
+
+ggpaired(fullbudget_stress,x="release",y="Means",fill="release",color="slategray4",line.color="gray",line.size = 0.4) + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
 ```
 
 *Running Wilcoxon Test*
@@ -1344,6 +1348,8 @@ post <- subset(fullbudget_feed, release == "post", Means,
 # Plot paired data
 pd <- paired(pre, post)
 plot(pd, type = "profile") + theme_bw()
+
+ggpaired(fullbudget_feed,x="release",y="Means",fill="release",color="slategray4",line.color="gray",line.size = 0.4) + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
 ```
 
 *Running Wilcoxon Test*
@@ -1417,6 +1423,8 @@ post <- subset(fullbudget_loc, release == "post", Means,
 # Plot paired data
 pd <- paired(pre, post)
 plot(pd, type = "profile") + theme_bw()
+
+ggpaired(fullbudget_loc,x="release",y="Means",fill="release",color="slategray4",line.color="gray",line.size = 0.4) + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
 ```
 
 *Running Wilcoxon Test*
@@ -1493,6 +1501,8 @@ post <- subset(fullbudget_loc, release == "post", Means,
 # Plot paired data
 pd <- paired(pre, post)
 plot(pd, type = "profile") + theme_bw()
+
+ggpaired(fullbudget_other,x="release",y="Means",fill="release",color="slategray4",line.color="gray",line.size = 0.4) + xlab("Release Stage") + ylab("Mean Hourly Count") + scale_fill_manual(values = c("skyblue3","skyblue3")) + theme(legend.position = "none")
 ```
 
 *Running Wilcoxon Test*
