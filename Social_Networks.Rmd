@@ -1,7 +1,7 @@
 ---
 title: "Vervet Social Networks"
-author: "Christopher A Schmitt"
-date: "`r Sys.Date()`"
+author: "Nick Mikulski, with modifications by Christopher A Schmitt"
+date: "May 24, 2023"
 output: 
   html_document:
     toc: TRUE
@@ -150,3 +150,916 @@ plot(pre_sn_graph,
      )  #rep(c("darkred","yellow"), (length(pre_sn_proximity))))  #col)    #"black") #pre_sn_color)
 ```
 
+I have been able to assign the color palette, but it is not being applied properly. The thickest lines (strongest proximity value) should be the darkest color and the thinnest (weakest proximity value) should be the lightest color. I’ve been playing around with this a lot, and cannot figure out how to properly assign the color palette.
+
+# 2 Post-Release Proximity Plot
+
+## 2.1 Inputting Datasets & Editing the Dataframe
+
+Removing Batman and possibly others: c(“RE”, “SK”, “BT”)
+
+```{r}
+post_socnet<- curl("https://raw.githubusercontent.com/nickmikulski/Spring2021/main/Post-release_Social%20Proximity_CSV.csv")
+post_socnet<- read.csv(post_socnet, header = T, na.strings=c(""," ","NA"))
+#head(post_socnet)
+#str(post_socnet)
+
+post_socnet_close<- post_socnet %>% #creating a new dataframe called post_socnet_close using data from the original post_socnet dataframe
+  filter(Focal.ID != c("BT"), #this code REMOVES all data that has Batman as the focal ID (BT is wild male from prerelease)
+         Association != c("BT"), #this code REMOVES all data that has Batman in association column
+         Proximity.Code %in% c("1","2") #this code only keeps proximity codes 1,2 (excluding 3,4) because we are focusing on closer proximity
+  ) 
+#head(post_socnet_close)
+```
+
+## 2.2 Creating a Matrix
+
+```{r}
+# 1. Create a character vector of all the focal IDs in dataset:
+post_sn_IDs<-sort(as.character(unique(post_socnet_close$Focal.ID)))
+#post_sn_IDs
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+post_sn_monkeylist<-lapply(post_sn_IDs, function(x){post_socnet[post_socnet[["Focal.ID"]] == x, ]})
+# The line above is a little bit confusing. It is creating a separate dataframe for each individual based on their focal id
+#head(post_sn_monkeylist)
+
+# 3. Group each by focal/associate, and count how many times they are observed close together:
+post_sn_grouped<-
+  post_sn_monkeylist %>%
+  purrr::map(~group_by(.,Association)) %>%
+  purrr::map(~summarize(.,count=n())) 
+#post_sn_grouped
+
+names(post_sn_grouped) <- post_sn_IDs #this gives each grouped list the name of the Focal ID
+#post_sn_grouped
+
+# 4. Set up pairwise combinations of interacting monkeys:
+post_sn_monkeycombos<-list(focal=post_sn_IDs, associate=post_sn_IDs) #create list of all possible focals/associates
+post_sn_filtf<- function(x, y) {x == y} #create function to filter out same-monkey pairs ("PO is close to PO")
+post_sn_combo<- post_sn_monkeycombos %>% cross_df(.,.filter=post_sn_filtf) #get the filtered combined list as a dataframe
+#post_sn_combo
+```
+
+## 2.3 Create the dataframe and matrix
+
+```{r}
+# 5. Create new dataframes with specific criteria
+post_sn_combo2<-
+  post_sn_combo %>%
+  mutate(absent1 = map2_chr( #new column called "absent1"
+    focal,
+    associate,
+    ~if_else(.x %in% names(post_sn_grouped),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    focal,
+    associate,
+    ~if_else(.y %in% post_sn_grouped[[.x]]$Association,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2) #this removes those two new columns you made so you're just left with the ID names
+#Honestly I was quite confused on parts of this, but Laura/Dr. Schmitt gave me this helpful code
+
+post_sn_combo3<- post_sn_combo2 %>% 
+  mutate(proximity = map2_int( #new column called "proximity" that is the count for when proximity code = 1 or 2
+    focal, 
+    associate, 
+    ~post_sn_grouped %>% pluck(.x) %>% filter(Association==.y) %>% as.data.frame(.) %>% .[,2]))
+post_sn_combo3
+
+# 6. Create your matrix
+post_sn_matrix<-spread(post_sn_combo3,associate,proximity) %>% column_to_rownames(var="focal") %>% data.matrix()
+#post_sn_matrix
+```
+
+## 2.4 Creating a social network plot based on this matrix
+
+Converting the matrix into a data frame
+(removed BA, add CI, add HO, add PA, add RE, add SK)
+
+```{r}
+post_sn_codes <- sort(post_sn_IDs)
+
+post_sn_df <- as.data.frame(post_sn_matrix, stringsAsFactors = TRUE)
+#post_sn_df
+```
+
+## 2.5 Plotting based on dataframe
+
+My original intention was to use the matrix that was just created in order to plot the social network, however, I keep getting an error message that says "Some vertex names in edge list are not listed in vertex data frame. I tried trouble shooting this with no success, so I instead tried to work with the dataframe that created right before the matrix (pre_sn_combo3), and I had some success. Below is how I was originally trying to create the graph using the matrix.
+
+Alternatives (?):
+post_sn_graph <- graph_from_data_frame(d=post_sn_edges, vertices = post_sn_nodes, directed = TRUE) #Using the matrix
+
+```{r}
+post_sortprox <- post_sn_combo3[order(post_sn_combo3$proximity),]
+#post_sortprox
+
+post_sn_edges <- post_sn_df #assigning the matrix data frame to our edges
+post_sn_vertices <- c(post_sn_codes)
+post_sn_df2 <- as.data.frame(post_sortprox, stringsAsFactors = TRUE, row.names = post_sn_vertices)
+post_sn_graph <- graph_from_data_frame(d=post_sn_df2, vertices = post_sn_vertices, directed = FALSE) #using the step before the matrix
+#post_sn_graph
+#simplesn<-simplify(post_sn_graph, remove.multiple = FALSE, remove.loops = TRUE)
+
+post_sn_proximity <- as.numeric(unlist(dplyr::select(post_sn_combo3, "proximity"))) #Creating a numeric vector from the proximity values in order to visualize in plot   
+#post_sn_proximity
+
+#Trying to categorize by color:
+post_sn_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+post_sn_color <- post_sn_colorrange(length(post_sn_proximity)) #how many 
+```
+
+```{r,fig.height=4,fig.width=4}
+par(bg="white")
+plot(post_sn_graph,
+     vertex.size= 10, #(1/10*post_sn_proximity),
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.width=((1/50)*(post_sn_proximity)), #The thickness of the edges is now related to the proximity strength between indivs
+     edge.curved=0.25, #c(rep(0,500), rep(1,500)),
+     edge.color=post_sn_color) 
+```
+
+# 3 Pre-Release Grooming Plot
+
+## 3.1 Importing the FULL pre-continuous dataset
+
+```{r}
+pre_cont<- curl("https://raw.githubusercontent.com/langley1/LWTdata2016/main/2016_pre-release_cont_FULL.csv")
+pre_cont<- read.csv(pre_cont, header=T, na.strings=c(""," ","NA"))
+```
+
+## 3.2 Grooming Matrix+ (focal RECEIVES grooming)
+
+```{r}
+# 1. Create a character vector of all the monkey IDs in your dataset:
+MonkeyIDs<-as.character(unique(pre_cont$FOCAL.ID))
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+monkey.prelim<-lapply(MonkeyIDs, function(x){pre_cont[pre_cont[["FOCAL.ID"]] == x, ]})
+#head(monkey.prelim)
+
+# 3. Filter each by the behavior your want, group each by associate/recipient, and count behavior:
+monkey_G.prelim<-
+  monkey.prelim %>%
+  purrr::map(~filter(.,BEHAVIOUR=="G+")) %>%
+  purrr::map(~group_by(.,ASSOCIATION)) %>%
+  purrr::map(~summarize(.,count=n()))
+
+names(monkey_G.prelim) <- MonkeyIDs
+```
+
+```{r}
+# 4. Set up your pairwise combinations of interacting monkeys:
+monkeylist<-list(actor=MonkeyIDs,recipient=MonkeyIDs) #create list of all possible actors/recipients
+filt <- function(x, y) {x == y} #create function to filter out same-monkey pairs ("FZ grooms FZ")
+combo <- monkeylist %>% cross_df(.,.filter=filt) #get the filtered combined list as a dataframe
+#head(combo)
+
+# 5. 
+combo_G<-
+  combo %>%
+  mutate(absent1 = map2_chr(
+    recipient, # I swapped the recipient/actor **here and below
+    actor,
+    ~if_else(.x %in% names(monkey_G.prelim),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    recipient, #**here
+    actor,
+    ~if_else(.y %in% monkey_G.prelim[[.x]]$ASSOCIATION,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2)
+
+G1<-combo_G %>% 
+  mutate(grooms = map2_int(
+    recipient, #**here
+    actor, 
+    ~monkey_G.prelim %>% pluck(.x) %>% filter(ASSOCIATION==.y) %>% as.data.frame(.) %>% .[,2]))
+#G1
+
+grooming_matrix<-spread(G1,actor,grooms) %>% column_to_rownames(var="recipient") %>% data.matrix() #**here
+#grooming_matrix
+```
+
+### 3.2.1 Pre-Release RECEIVE Groom Plot
+
+```{r}
+groom_IDs <- sort(MonkeyIDs)
+pre_groom_plus_df <- as.data.frame(grooming_matrix, stringsAsFactors = TRUE)
+#pre_groom_plus_df
+pre_sortgroomplus <- G1[order(G1$grooms),]
+#pre_sortgroomplus
+
+pre_groomplus_edges <- pre_groom_plus_df #assigning the matrix data frame to our edges
+pre_groomplus_vertices <- groom_IDs
+pre_groomplus_df2 <- as.data.frame(pre_sortgroomplus, stringsAsFactors = TRUE, row.names = pre_groomplus_vertices)
+pre_groomplus_graph <- graph_from_data_frame(d=pre_groomplus_df2, vertices = pre_groomplus_vertices, directed = TRUE)
+#pre_groomplus_graph
+
+pre_groomplus <- as.numeric(unlist(dplyr::select(G1, "grooms"))) #Creating a numeric vector from the grooms values in order to visualize in plot   
+sort_pre_groomplus<- sort(pre_groomplus)
+#sort_pre_groomplus
+
+l <- layout_with_fr(pre_groomplus_graph)
+l <- norm_coords(l, ymin=-1, ymax=1, xmin=-1, xmax=1)
+```
+
+```{r,fig.height=4,fig.width=4}
+par(bg="white")
+plot(pre_groomplus_graph,
+     vertex.size= 8,
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.arrow.size=0.5,
+     edge.width=((1/8)*(sort_pre_groomplus)),
+     edge.curved=0.25,
+     edge.color="black",
+     margin=0,
+     edge.arrow.size=0.5,
+     rescale=FALSE,
+     layout=l*1) 
+```
+
+## 3.3 Grooming Matrix- (focal GROOMS)
+
+```{r}
+monkey_G2.prelim<-
+  monkey.prelim %>%
+  purrr::map(~filter(.,BEHAVIOUR=="G-")) %>%
+  purrr::map(~group_by(.,ASSOCIATION)) %>%
+  purrr::map(~summarize(.,count=n()))
+
+names(monkey_G2.prelim) <- MonkeyIDs
+
+# 4. Set up your pairwise combinations of interacting monkeys:
+monkeylist<-list(actor=MonkeyIDs,recipient=MonkeyIDs) #create list of all possible actors/recipients
+filt <- function(x, y) {x == y} #create function to filter out same-monkey pairs ("FZ grooms FZ")
+combo <- monkeylist %>% cross_df(.,.filter=filt) #get the filtered combined list as a dataframe
+
+combo_G2<-
+  combo %>%
+  mutate(absent1 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.x %in% names(monkey_G2.prelim),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.y %in% monkey_G2.prelim[[.x]]$ASSOCIATION,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2)
+#combo_G2
+
+G2<-combo_G2 %>% 
+  mutate(grooms = map2_int(
+    actor, 
+    recipient, 
+    ~monkey_G2.prelim %>% pluck(.x) %>% filter(ASSOCIATION==.y) %>% as.data.frame(.) %>% .[,2]))
+#G2
+
+grooming_matrix2<-spread(G2,recipient,grooms) %>% column_to_rownames(var="actor") %>% data.matrix()
+#grooming_matrix2
+```
+
+### 3.3.1 Pre-Release GIVE Groom Plot
+
+```{r}
+groom_IDs <- sort(MonkeyIDs)
+pre_groom_minus_df <- as.data.frame(grooming_matrix2, stringsAsFactors = TRUE)
+#pre_groom_minus_df
+
+pre_sortgroomminus <- G2[order(G2$grooms),]
+pre_sortgroomminus
+
+pre_groomminus_edges <- pre_groom_minus_df #assigning the matrix data frame to our edges
+pre_groomminus_vertices <- groom_IDs
+pre_groomminus_df2 <- as.data.frame(pre_sortgroomminus, stringsAsFactors = TRUE, row.names = pre_groomminus_vertices)
+pre_groomminus_graph <- graph_from_data_frame(d=pre_groomminus_df2, vertices = pre_groomminus_vertices, directed = TRUE)
+#pre_groomminus_graph
+
+pre_groomminus <- as.numeric(unlist(dplyr::select(G2, "grooms"))) #Creating a numeric vector from the grooms values in order to visualize in plot  
+sort_pre_groomminus<- sort(pre_groomminus)
+
+#Trying to categorize by color:
+pre_groomminus_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+pre_groomminus_color <- pre_groomminus_colorrange(length(pre_groomminus_graph)) #how many
+```
+
+```{r,fig.height=4,fig.width=4}
+par(bg="white")
+plot(pre_groomminus_graph,
+     vertex.size= 8,
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.width=((1/8)*(sort_pre_groomminus)),
+     edge.curved=0.25,
+     edge.arrow.size=0.5,
+     edge.color="black") 
+```
+
+## 3.4 Combining Grooming Received and Grooming Given
+
+```{r}
+# 1. Create a character vector of all the monkey IDs in your dataset:
+MonkeyIDs<-as.character(unique(pre_cont$FOCAL.ID))
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+monkey.prelim<-lapply(MonkeyIDs, function(x){pre_cont[pre_cont[["FOCAL.ID"]] == x, ]})
+#head(monkey.prelim)
+
+# 3. Filter each by the behavior your want, group each by associate/recipient, and count behavior:
+monkey_G.prelim2<-
+  monkey.prelim %>%
+  purrr::map(~filter(.,BEHAVIOUR %in% c("G+","G-"))) %>%
+  purrr::map(~group_by(.,ASSOCIATION)) %>%
+  purrr::map(~summarize(.,count=n()))
+
+names(monkey_G.prelim2) <- MonkeyIDs
+
+# 4. Set up your pairwise combinations of interacting monkeys:
+monkeylist<-list(actor=MonkeyIDs,recipient=MonkeyIDs) #create list of all possible actors/recipients
+filt <- function(x, y) {x == y} #create function to filter out same-monkey pairs ("FZ grooms FZ")
+combo <- monkeylist %>% cross_df(.,.filter=filt) #get the filtered combined list as a dataframe
+head(combo)
+```
+
+```{r}
+# 5.
+combo_G2<-
+  combo %>%
+  mutate(absent1 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.x %in% names(monkey_G.prelim2),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.y %in% monkey_G.prelim2[[.x]]$ASSOCIATION,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2)
+#combo_G2
+
+G1_FULL<-combo_G2 %>% 
+  mutate(grooms = map2_int( #new column called grooms
+    actor, 
+    recipient, 
+    ~monkey_G.prelim2 %>% pluck(.x) %>% filter(ASSOCIATION==.y) %>% as.data.frame(.) %>% .[,2]))
+G1_FULL
+```
+
+```{r}
+grooming_matrix_FULL<-spread(G1_FULL,recipient,grooms) %>% column_to_rownames(var="actor") %>% data.matrix()
+#grooming_matrix_FULL
+```
+
+### 3.4.1 Plotting Combined Grooming
+
+### 3.4.2 Converting to Dataframe
+
+```{r}
+groom_IDs <- sort(MonkeyIDs)
+
+pre_groom_df <- as.data.frame(grooming_matrix_FULL, stringsAsFactors = TRUE)
+#pre_groom_df
+```
+
+### 3.4.3 Create graph elements & color range
+
+```{r}
+pre_sortgroom <- G1_FULL[order(G1_FULL$grooms),]
+#pre_sortgroom
+
+pre_groom_edges <- pre_groom_df #assigning the matrix data frame to our edges
+pre_groom_vertices <- groom_IDs
+pre_groom_df2 <- as.data.frame(pre_sortgroom, stringsAsFactors = TRUE, row.names = pre_groom_vertices)
+pre_groom_graph <- graph_from_data_frame(d=pre_groom_df2, vertices = pre_groom_vertices, directed = TRUE) #using the step before the matrix
+#pre_groom_graph
+
+#simplesn<-simplify(post_sn_graph, remove.multiple = FALSE, remove.loops = TRUE)
+
+pre_grooms <- as.numeric(unlist(dplyr::select(G1_FULL, "grooms"))) #Creating a numeric vector from the grooms values in order to visualize in plot   
+#pre_grooms
+
+#Trying to categorize by color:
+pre_grooms_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+pre_grooms_color <- pre_grooms_colorrange(length(pre_grooms)) #how many
+```
+
+### 3.4.4 Plot graph Combined
+
+```{r,fig.height=4,fig.width=4}
+par(bg="white")
+plot(pre_groom_graph,
+     vertex.size= 8, #(1/10*pre_grooms),
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.width=((1/10)*(pre_grooms)), #The thickness of the edges is now related to the grooms strength between indivs
+     edge.curved=0.25, #c(rep(0,500), rep(1,500)),
+     edge.color=post_sn_color) 
+```
+
+## 3.5 Grooming Matrix+ for FEMALES ONLY (focals RECEIVES grooming)
+
+```{r}
+# 1. Create a character vector of all the monkey IDs in your dataset:
+pre_cont_fems<- pre_cont %>% filter(sex == "F")
+MonkeyIDs_fems<-as.character(unique(pre_cont_fems$FOCAL.ID))
+#MonkeyIDs_fems
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+monkey.prelim_fems<-lapply(MonkeyIDs_fems, function(x){pre_cont_fems[pre_cont_fems[["FOCAL.ID"]] == x, ]})
+#head(monkey.prelim_fems)
+
+monkey_Gfems.prelim<-
+  monkey.prelim_fems %>%
+  purrr::map(~filter(.,BEHAVIOUR=="G+")) %>%
+  purrr::map(~group_by(.,ASSOCIATION)) %>%
+  purrr::map(~summarize(.,count=n()))
+```
+
+```{r}
+names(monkey_Gfems.prelim) <- MonkeyIDs_fems
+
+#Recipient and actor have been flipped here in order to correct arrow direction
+combo_Gfems<-
+  combo %>%
+  mutate(absent1 = map2_chr(
+    recipient,
+    actor,
+    ~if_else(.x %in% names(monkey_Gfems.prelim),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    recipient,
+    actor,
+    ~if_else(.y %in% monkey_Gfems.prelim[[.x]]$ASSOCIATION,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2)
+
+G1fems<-combo_Gfems %>% 
+  mutate(grooms = map2_int(
+    recipient, 
+    actor, 
+    ~monkey_Gfems.prelim %>% pluck(.x) %>% filter(ASSOCIATION==.y) %>% as.data.frame(.) %>% .[,2]))
+#G1fems
+
+#Creating a matrix:
+grooming_matrix_fems<-spread(G1fems,actor,grooms) %>% column_to_rownames(var="recipient") %>% data.matrix()
+#grooming_matrix_fems
+
+groom_fem_df <- as.data.frame(grooming_matrix_fems, stringsAsFactors = TRUE)
+#groom_fem_df
+```
+
+?graph_from_data_frame
+
+#### 3.5.0.1 Create graph elements & color range
+
+```{r}
+pre_sortgroomf <- G1fems[order(G1fems$grooms),]
+pre_sortgroomf
+
+pre_groomf_edges <- groom_fem_df #assigning the matrix data frame to our edges
+pre_groomf_vertices <- MonkeyIDs_fems
+pre_groomf_df2 <- as.data.frame(G1fems, stringsAsFactors = TRUE, row.names = pre_groomf_vertices)
+pre_groomf_graph <- graph_from_data_frame(d=combo_Gfems, vertices = MonkeyIDs, directed = TRUE) #using the step before the matrix
+#pre_groomf_graph
+
+pre_groomsf <- as.numeric(unlist(dplyr::select(G1fems, "grooms"))) #Creating a numeric vector from the grooms values in order to visualize in plot   
+#pre_groomsf
+
+#Trying to categorize by color:
+pre_groomsf_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+pre_groomsf_color <- pre_groomsf_colorrange(length(pre_groomsf)) #how many 
+```
+
+### 3.5.1 Plot females only graph (incomplete)
+
+```{r,fig.height=4,fig.width=4}
+par(bg="white")
+plot(pre_groomf_graph,
+     vertex.size= 8, #(1/10*pre_grooms),
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.width=((1/10)*(pre_groomsf)), #The thickness of the edges is now related to the grooms strength between indivs
+     edge.curved=0.25, #c(rep(0,500), rep(1,500)),
+     edge.color=post_sn_color) 
+```
+
+
+**Check: I think this is correct because the code selected for female G+ (Grooming received), so males can give. Arrows pointing from receiving female to giving individual
+
+# 4 Post-Release Grooming Plot
+
+## 4.1 Importing the FULL post-continuous dataset
+
+```{r}
+library(curl)
+library(tidyverse)
+post_cont<- curl("https://raw.githubusercontent.com/langley1/LWTdata2016/main/2016_post-release_cont_FULL.csv")
+post_cont<- read.csv(post_cont, header = T, na.strings=c(""," ","NA"))
+#head(post_cont)
+```
+
+## 4.2 Grooming Matrix+ (focal RECEIVES grooming)
+
+```{r}
+# 1. Create a character vector of all the monkey IDs in your dataset:
+MonkeyIDs_postgroom<-as.character(unique(post_cont$FOCAL.ID))
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+monkey.prelim.post<-lapply(MonkeyIDs_postgroom, function(x){post_cont[post_cont[["FOCAL.ID"]] == x, ]})
+#head(monkey.prelim.post)
+
+# 3. Filter each by the behavior your want, group each by associate/recipient, and count behavior:
+monkey_G.prelim.post<-
+  monkey.prelim.post %>%
+  purrr::map(~filter(.,BEHAVIOUR=="G+")) %>%
+  purrr::map(~group_by(.,ASSOCIATION)) %>%
+  purrr::map(~summarize(.,count=n()))
+```
+
+```{r}
+names(monkey_G.prelim.post) <- MonkeyIDs_postgroom
+
+# 4. Set up your pairwise combinations of interacting monkeys:
+monkeylist_post<-list(actor=MonkeyIDs_postgroom,recipient=MonkeyIDs_postgroom) #create list of all possible actors/recipients
+filt <- function(x, y) {x == y} #create function to filter out same-monkey pairs ("FZ grooms FZ")
+combo_post <- monkeylist_post %>% cross_df(.,.filter=filt) #get the filtered combined list as a dataframe
+#head(combo_post)
+
+# 5. 
+combo_G_post<-
+  combo_post %>%
+  mutate(absent1 = map2_chr(
+    recipient,
+    actor,
+    ~if_else(.x %in% names(monkey_G.prelim.post),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    recipient,
+    actor,
+    ~if_else(.y %in% monkey_G.prelim.post[[.x]]$ASSOCIATION,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2)
+
+G1_post<-combo_G_post %>% 
+  mutate(grooms = map2_int(
+    recipient, 
+    actor, 
+    ~monkey_G.prelim.post %>% pluck(.x) %>% filter(ASSOCIATION==.y) %>% as.data.frame(.) %>% .[,2]))
+#G1_post
+
+grooming_matrix_post<-spread(G1_post,actor,grooms) %>% column_to_rownames(var="recipient") %>% data.matrix()
+#grooming_matrix_post
+```
+
+### 4.2.1 Post-Release RECEIVE Groom Plot
+
+```{r}
+groom_IDs_postrg <- sort(MonkeyIDs_postgroom) 
+post_groom_plus_df <- as.data.frame(grooming_matrix_post, stringsAsFactors = TRUE)
+post_sortgroomplus <- G1_post[order(G1_post$grooms),]
+post_groomplus_edges <- post_groom_plus_df
+post_groomplus_vertices <- groom_IDs_postrg
+post_groomplus_df2 <- as.data.frame(post_sortgroomplus, stringsAsFactors = TRUE, row.names = post_groomplus_vertices)
+post_groomplus_df2
+
+
+post_groomplus_graph <- graph_from_data_frame(d=post_groomplus_df2, vertices = post_groomplus_vertices, directed = TRUE)
+post_groomplus <- as.numeric(unlist(dplyr::select(G1_post, "grooms")))
+sort_post_groomplus<- sort(post_groomplus)
+
+#Trying to categorize by color:
+post_groomplus_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+post_groomplus_color <- post_groomplus_colorrange(length(post_groomplus)) #how many
+```
+
+```{r,fig.height=4,fig.width=4}
+par(bg="white")
+plot(post_groomplus_graph,
+     vertex.size= 8,
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.width=((1/3)*(sort_post_groomplus)),
+     edge.curved=0.25, 
+     edge.color="black",
+     edge.arrow.size=0.5) 
+```
+
+## 4.3 Grooming Matrix- (focal GIVES grooming)
+
+```{r}
+# 1. Create a character vector of all the monkey IDs in your dataset:
+MonkeyIDs_postgroom<-as.character(unique(post_cont$FOCAL.ID))
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+monkey.prelim.post<-lapply(MonkeyIDs_postgroom, function(x){post_cont[post_cont[["FOCAL.ID"]] == x, ]})
+#head(monkey.prelim.post)
+
+# 3. Filter each by the behavior your want, group each by associate/recipient, and count behavior:
+monkey_G.prelim.postm<-
+  monkey.prelim.post %>%
+  purrr::map(~filter(.,BEHAVIOUR=="G-")) %>%
+  purrr::map(~group_by(.,ASSOCIATION)) %>%
+  purrr::map(~summarize(.,count=n()))
+```
+
+```{r}
+names(monkey_G.prelim.postm) <- MonkeyIDs_postgroom
+
+# 4. Set up your pairwise combinations of interacting monkeys:
+monkeylist_post<-list(actor=MonkeyIDs_postgroom,recipient=MonkeyIDs_postgroom) #create list of all possible actors/recipients
+filt <- function(x, y) {x == y} #create function to filter out same-monkey pairs ("FZ grooms FZ")
+combo_post <- monkeylist_post %>% cross_df(.,.filter=filt) #get the filtered combined list as a dataframe
+#head(combo_post)
+
+# 5. 
+combo_G_postm<-
+  combo_post %>%
+  mutate(absent1 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.x %in% names(monkey_G.prelim.postm),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.y %in% monkey_G.prelim.postm[[.x]]$ASSOCIATION,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2)
+
+G1_postm<-combo_G_postm %>% 
+  mutate(grooms = map2_int(
+    actor, 
+    recipient, 
+    ~monkey_G.prelim.postm %>% pluck(.x) %>% filter(ASSOCIATION==.y) %>% as.data.frame(.) %>% .[,2]))
+#G1_postm
+
+grooming_matrix_postm<-spread(G1_postm,recipient,grooms) %>% column_to_rownames(var="actor") %>% data.matrix()
+#grooming_matrix_postm
+```
+
+### 4.3.1 Post-Release RECEIVE Groom Plot
+
+```{r}
+groom_IDs_postgm <- sort(MonkeyIDs_postgroom) 
+post_groom_minus_df <- as.data.frame(grooming_matrix_postm, stringsAsFactors = TRUE)
+post_sortgroomminus <- G1_postm[order(G1_postm$grooms),]
+post_groomminus_edges <- post_groom_minus_df
+post_groomminus_vertices <- groom_IDs_postgm
+post_groomminus_df2 <- as.data.frame(post_sortgroomminus, stringsAsFactors = TRUE, row.names = post_groomminus_vertices)
+post_groomminus_df2
+
+
+post_groomminus_graph <- graph_from_data_frame(d=post_groomminus_df2, vertices = post_groomminus_vertices, directed = TRUE)
+post_groomminus <- as.numeric(unlist(dplyr::select(G1_postm, "grooms")))
+sort_post_groomminus<- sort(post_groomminus)
+
+#Trying to categorize by color:
+post_groomminus_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+post_groomminus_color <- post_groomminus_colorrange(length(post_groomminus_graph)) #how many   
+```
+
+```{r,fig.width=4,fig.height=4}
+par(bg="white")
+plot(post_groomminus_graph,
+     vertex.size= 8, 
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     edge.width=((1/2)*(sort_post_groomminus)),
+     edge.curved=0.25,
+     edge.color="black",
+     edge.arrow.size=0.5) 
+```
+
+## 4.4 Combining Grooming Received and Grooming Given
+
+```{r}
+# 1. Create a character vector of all the monkey IDs in your dataset:
+MonkeyIDs_postgroom<-as.character(unique(post_cont$FOCAL.ID))
+
+# 2. Get a list of dataframes, subsetted by monkey ID:
+monkey.prelim.post<-lapply(MonkeyIDs_postgroom, function(x){post_cont[post_cont[["FOCAL.ID"]] == x, ]})
+#head(monkey.prelim.post)
+
+# 3. Filter each by the behavior your want, group each by associate/recipient, and count behavior:
+monkey_G.prelim.post2<-
+  monkey.prelim.post %>%
+  purrr::map(~filter(.,BEHAVIOUR %in% c("G+","G-"))) %>%
+  purrr::map(~group_by(.,ASSOCIATION)) %>%
+  purrr::map(~summarize(.,count=n())) 
+```
+
+```{r}
+names(monkey_G.prelim.post2) <- MonkeyIDs_postgroom
+
+# 4. Set up your pairwise combinations of interacting monkeys:
+monkeylist_post<-list(actor=MonkeyIDs_postgroom,recipient=MonkeyIDs_postgroom) #create list of all possible actors/recipients
+filt <- function(x, y) {x == y} #create function to filter out same-monkey pairs ("FZ grooms FZ")
+combo_post <- monkeylist_post %>% cross_df(.,.filter=filt) #get the filtered combined list as a dataframe
+#head(combo_post)
+
+# 5.
+combo_G_post2<-
+  combo_post %>%
+  mutate(absent1 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.x %in% names(monkey_G.prelim.post2),true="TRUE",false="FALSE"))) %>%
+    mutate(absent2 = map2_chr(
+    actor,
+    recipient,
+    ~if_else(.y %in% monkey_G.prelim.post2[[.x]]$ASSOCIATION,true="TRUE",false="FALSE"))) %>%
+  filter(absent1 == "TRUE") %>%
+  filter(absent2 == "TRUE") %>%
+  dplyr::select(-absent1,-absent2)
+
+G1_post_FULL<-combo_G_post2 %>% 
+  mutate(grooms = map2_int(
+    actor, 
+    recipient, 
+    ~monkey_G.prelim.post2 %>% pluck(.x) %>% filter(ASSOCIATION==.y) %>% as.data.frame(.) %>% .[,2]))
+#G1_post_FULL
+
+grooming_matrix_post_FULL<-spread(G1_post_FULL,recipient,grooms) %>% column_to_rownames(var="actor") %>% data.matrix()
+#grooming_matrix_post_FULL
+```
+
+### 4.4.1 Converting to Dataframe
+
+```{r}
+post_groom_df <- as.data.frame(grooming_matrix_post_FULL, stringsAsFactors = TRUE)
+post_groom_df
+```
+
+### 4.4.2 Create graph elements & color range
+
+```{r}
+post_sortgroom <- G1_post_FULL[order(G1_post_FULL$grooms),]
+#post_sortgroom
+
+postgroomid <-MonkeyIDs_postgroom
+
+post_groom_edges <- post_groom_df #assigning the matrix data frame to our edges
+post_groom_vertices <- postgroomid
+post_groom_df2 <- as.data.frame(G1_post_FULL, stringsAsFactors = TRUE, row.names = post_groom_vertices) #removed sortgroom and sort(vertices)
+post_groom_graph <- graph_from_data_frame(d=post_groom_df2, vertices = postgroomid, directed = TRUE) #using the step before the matrix
+#post_groom_graph
+
+
+post_grooms <- as.numeric(unlist(dplyr::select(G1_post_FULL, "grooms"))) #Creating a numeric vector from the grooms values in order to visualize in plot   
+#post_grooms
+
+#Trying to categorize by color:
+post_grooms_colorrange <- colorRampPalette(c("darkred", "yellow")) #establishes color range
+post_grooms_color <- post_grooms_colorrange(length(post_grooms)) #how many
+```
+
+## 4.5 Plot graph
+
+```{r,fig.height=4,fig.width=4}
+par(bg="white")
+plot(post_groom_graph,
+     vertex.size= 8, #(1/10*post_grooms),
+     vertex.color="lightgrey",
+     vertex.label.color="black",
+     arrow.size=0.5,
+     edge.width=((1/5)*(post_grooms)), #The thickness of the edges is  related to the grooms strength between indivs
+     edge.curved=0.3, #c(rep(0,500), rep(1,500)),
+     edge.color=post_grooms_color) 
+```
+
+# 5 Final Figures
+
+## 5.1 Pre-Release Proximity Plot
+
+## 5.2 Post-Release Proximity Plot
+
+## 5.3 Pre-Release Grooming Plot
+
+Batman had the lease grooming interactions with the group pre-release, which makes sense as he was the wild male who joined the group, but he was not released with the group.[]
+
+## 5.4 Post-Release Grooming Plot
+
+Zip & Jack appear to have no grooming connections post-release Neville only one connection with Tinker
+
+# 6 Calculating Centrality
+
+I found the same patterns to be true between centrality types. Either are a good representation of centrality for our purposes.
+
+## 6.1 Local Centrality
+
+### 6.1.1 Pre-Release Proximity Plot
+
+```{r}
+degree.cent_pre_prox <- centr_degree(pre_sn_graph, mode = "all")
+#degree.cent_pre_prox$res
+
+pre_prox_lcent <- data.frame(pre_sn_IDs, (degree.cent_pre_prox$res))
+#pre_prox_lcent
+pre_prox_lcent[order(-pre_prox_lcent$X.degree.cent_pre_prox.res.), ]
+```
+
+There is little/no difference in centrality within the pre-release proximity graph. This makes sense as they are in a confined location and are likely coming in contact with every other individual.
+
+### 6.1.2 Post-Release Proximity Plot
+
+```{r}
+degree.cent_post_prox <- centr_degree(post_sn_graph, mode = "all")
+#degree.cent_post_prox$res
+
+post_prox_lcent <- data.frame(post_sn_IDs, (degree.cent_post_prox$res))
+#post_prox_lcent
+post_prox_lcent[order(-post_prox_lcent$X.degree.cent_post_prox.res.), ]
+```
+
+In the post-release centrality measure, we begin to see some individuals becoming more centrally important to the group. AM is the most central and ZI is the least central individual.
+
+### 6.1.3 Proximity Comparison
+
+### 6.1.4 Pre-Release Grooming Plot
+
+```{r}
+degree.cent_pre_groom <- centr_degree(pre_groom_graph, mode = "all")
+#degree.cent_pre_groom$res
+
+pre_groom_lcent <- data.frame(MonkeyIDs, (degree.cent_pre_groom$res))
+#pre_groom_lcent
+pre_groom_lcent[order(-pre_groom_lcent$X.degree.cent_pre_groom.res.), ]
+```
+
+There is a higher degree of centrality in relation to grooming compared to proximity within the pre-release data. The most central grooming partner is KO, while the least was BT. This is not surprising because BT was the wild male that joined the group before release. It makes sense that he would have the least grooming interactions.
+
+### 6.1.5 Post-Release Grooming Plot
+```{r}
+degree.cent_post_groom <- centr_degree(post_groom_graph, mode = "all")
+#degree.cent_post_groom$res
+
+post_groom_lcent <- data.frame(MonkeyIDs_postgroom, (degree.cent_post_groom$res))
+#post_groom_lcent
+post_groom_lcent[order(-post_groom_lcent$X.degree.cent_post_groom.res.), ]
+```
+
+Centrality within grooming relations is much lower and much more varied overall in the post-release data. The most central grooming partner was AU, and there was even two individuals, ZI and JA, who had no recorded grooming partners at all post-release.
+
+### 6.1.6 Grooming Comparison
+
+## 6.2 Global Centrality
+
+### 6.2.1 Pre-Release Proximity Plot
+
+```{r}
+closeness.cent_pre_prox <- closeness(pre_sn_graph, mode = "all")
+#closeness.cent_pre_prox$res
+
+pre_prox_gcent <- data.frame(pre_sn_IDs, (degree.cent_pre_prox$res))
+#pre_prox_gcent
+pre_prox_gcent[order(-pre_prox_gcent$X.degree.cent_pre_prox.res.), ]
+```
+
+There is little/no difference in centrality within the pre-release proximity graph. This makes sense as they are in a confined location and are likely coming in contact with every other individual.
+
+### 6.2.2 Post-Release Proximity Plot
+
+```{r}
+closeness_post_prox <- closeness(post_sn_graph, mode = "all")
+#closeness_post_prox$res
+
+post_prox_gcent <- data.frame(post_sn_IDs, (degree.cent_post_prox$res))
+#post_prox_gcent
+post_prox_gcent[order(-post_prox_gcent$X.degree.cent_post_prox.res.), ]
+```
+
+In the post-release centrality measure, we begin to see some individuals becoming more centrally important to the group. AM is the most central and ZI is the least central individual.
+
+### 6.2.3 Pre-Release Grooming Plot
+
+```{r}
+closeness_pre_groom <- closeness(pre_groom_graph, mode = "all")
+#closeness_pre_groom$res
+
+pre_groom_gcent <- data.frame(MonkeyIDs, (degree.cent_pre_groom$res))
+#pre_groom_gcent
+pre_groom_gcent[order(-pre_groom_gcent$X.degree.cent_pre_groom.res.), ]
+```
+
+There is a higher degree of centrality in relation to grooming compared to proximity within the pre-release data. The most central grooming partner is KO, while the least was BT. This is not surprising because BT was the wild male that joined the group before release. It makes sense that he would have the least grooming interactions.
+
+### 6.2.4 Post-Release Grooming Plot
+
+```{r}
+closeness_post_groom <- closeness(post_groom_graph, mode = "all")
+## Warning in closeness(post_groom_graph, mode = "all"): At centrality.c:
+## 2784 :closeness centrality is not well-defined for disconnected graphs
+#closeness_post_groom$res
+
+post_groom_gcent <- data.frame(MonkeyIDs_postgroom, (degree.cent_post_groom$res))
+#post_groom_gcent
+post_groom_gcent[order(-post_groom_gcent$X.degree.cent_post_groom.res.), ]
+```
+
+Centrality within grooming relations is much lower and much more varied overall in the post-release data. The most central grooming partner was AU, and there was even two individuals, ZI and JA, who had no recorded grooming partners at all post-release.
